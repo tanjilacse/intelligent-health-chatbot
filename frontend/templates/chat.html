@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesundheit</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="chat-container">
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h2>👤 {{ username }}</h2>
+                <a href="/logout" class="logout-btn">Logout</a>
+            </div>
+            
+            <div class="documents-section">
+                <h3>📁 My Documents</h3>
+                <div id="documents-list"></div>
+            </div>
+        </div>
+        
+        <div class="main-chat">
+            <div class="chat-header">
+                <h1>🏥 Gesundheit</h1>
+            </div>
+            
+            <div id="chat-messages" class="chat-messages">
+                <div class="welcome-message">
+                    <h2>Welcome to Gesundheit!</h2>
+                    <p>Upload medical documents and ask me anything about your health.</p>
+                </div>
+            </div>
+            
+            <div class="chat-input-container">
+                <input type="file" id="file-input" accept=".jpg,.jpeg,.png,.pdf" style="display:none" onchange="handleFileSelect()">
+                <button class="attach-btn" onclick="document.getElementById('file-input').click()">📎</button>
+                <input type="text" id="message-input" placeholder="Ask about your health..." onkeypress="handleKeyPress(event)">
+                <button class="send-btn" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let selectedFile = null;
+        
+        async function loadDocuments() {
+            const response = await fetch('/api/documents/list');
+            const data = await response.json();
+            
+            const list = document.getElementById('documents-list');
+            if (data.documents && data.documents.length > 0) {
+                list.innerHTML = data.documents.map(doc => 
+                    `<div class="doc-item">📄 ${doc.name}<br><small>${doc.date}</small></div>`
+                ).join('');
+            } else {
+                list.innerHTML = '<p class="no-docs">No documents yet</p>';
+            }
+        }
+        
+        function handleFileSelect() {
+            selectedFile = document.getElementById('file-input').files[0];
+            if (selectedFile) {
+                addMessage('user', `📎 Selected: ${selectedFile.name}`);
+                uploadFile();
+            }
+        }
+        
+        async function uploadFile() {
+            if (!selectedFile) return;
+            
+            const formData = new FormData();
+            formData.append('file', selectedFile);
+            
+            addMessage('assistant', '⏳ Uploading and analyzing document...');
+            
+            const response = await fetch('/api/documents/upload', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                addMessage('assistant', `✅ Document uploaded successfully!\n\nExtracted text preview:\n${data.extracted_text}...`);
+                loadDocuments();
+            } else {
+                addMessage('assistant', `❌ Error: ${data.error}`);
+            }
+            
+            selectedFile = null;
+            document.getElementById('file-input').value = '';
+        }
+        
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+        
+        async function sendMessage() {
+            const input = document.getElementById('message-input');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            addMessage('user', message);
+            input.value = '';
+            
+            addMessage('assistant', '💭 Thinking...');
+            
+            const response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({message})
+            });
+            
+            const data = await response.json();
+            
+            // Remove thinking message
+            const messages = document.getElementById('chat-messages');
+            messages.removeChild(messages.lastChild);
+            
+            if (data.response) {
+                addMessage('assistant', data.response);
+            } else {
+                addMessage('assistant', `❌ Error: ${data.error}`);
+            }
+        }
+        
+        function addMessage(role, content) {
+            const messages = document.getElementById('chat-messages');
+            const welcome = messages.querySelector('.welcome-message');
+            if (welcome) welcome.remove();
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${role}-message`;
+            
+            // Render HTML for assistant, escape for user
+            if (role === 'assistant') {
+                // Aggressively clean whitespace and strip table inline styles
+                const processed = content
+                    .trim()
+                    .replace(/<table[^>]*>/g, '<table>')  // Remove inline styles from table
+                    .replace(/\s*\n\s*\n\s*<table>/g, '<br><br><table>')  // Max 2 breaks before table
+                    .replace(/<\/table>\s*\n\s*\n\s*/g, '</table><br><br>')  // Max 2 breaks after table
+                    .replace(/\n/g, '<br>')  // Convert remaining newlines
+                    .replace(/(<br>\s*){3,}/g, '<br><br>');  // Limit consecutive breaks
+                messageDiv.innerHTML = `<div class="message-content">${processed}</div>`;
+            } else {
+                messageDiv.innerHTML = `<div class="message-content">${content.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>')}</div>`;
+            }
+            
+            messages.appendChild(messageDiv);
+            messages.scrollTop = messages.scrollHeight;
+        }
+        
+        // Load documents on page load
+        loadDocuments();
+    </script>
+</body>
+</html>
